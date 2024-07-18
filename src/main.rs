@@ -1,3 +1,5 @@
+use std::collections::LinkedList;
+
 use iced::futures::FutureExt;
 use iced::theme::Button;
 use iced::time::{every, Duration};
@@ -143,6 +145,7 @@ struct Emulator {
     pc: u16,
     reg_i: u16,
     reg_v: [u8; 16],
+    stack: LinkedList<u16>,
     // TODO: implement more fields
 }
 
@@ -165,6 +168,7 @@ impl Emulator {
             pc: 0x200,
             reg_i: 0,
             reg_v: [0; 16],
+            stack: LinkedList::new(),
         })
     }
 
@@ -185,9 +189,40 @@ impl Emulator {
             0 if nnn == 0x0E0 => {
                 self.screen.clear();
             },
+            // 00EE
+            0 if nnn == 0x0EE => {
+                if let Some(pc) = self.stack.pop_back() {
+                    self.pc = pc;
+                } else {
+                    logs.push("Warning: attempted to return while stack is empty.".into());
+                }
+            }
             // 1NNN
             1 => {
                 self.pc = nnn;
+            },
+            // 2NNN
+            2 => {
+                self.stack.push_back(self.pc);
+                self.pc = nnn;
+            },
+            // 3XNN
+            3 => {
+                if self.reg_v[x as usize] == nn {
+                    self.pc += 2;
+                }
+            },
+            // 4XNN
+            4 => {
+                if self.reg_v[x as usize] != nn {
+                    self.pc += 2;
+                }
+            },
+            // 5XY0
+            5 if n == 0 => {
+                if self.reg_v[x as usize] == self.reg_v[y as usize] {
+                    self.pc += 2;
+                }
             },
             // 6XNN
             6 => {
@@ -196,6 +231,60 @@ impl Emulator {
             // 7XNN
             7 => {
                 self.reg_v[x as usize] = self.reg_v[x as usize].wrapping_add(nn);
+            },
+            // 8XY0
+            8 if n == 0 => {
+                self.reg_v[x as usize] = self.reg_v[y as usize];
+            },
+            // 8XY1
+            8 if n == 1 => {
+                self.reg_v[x as usize] |= self.reg_v[y as usize];
+            },
+            // 8XY2
+            8 if n == 2 => {
+                self.reg_v[x as usize] &= self.reg_v[y as usize];
+            },
+            // 8XY3
+            8 if n == 3 => {
+                self.reg_v[x as usize] ^= self.reg_v[y as usize];
+            },
+            // 8XY4
+            8 if n == 4 => {
+                let (x_new, carry) = self.reg_v[x as usize].overflowing_add(self.reg_v[y as usize]);
+                self.reg_v[x as usize] = x_new;
+                self.reg_v[0xF] = carry.into();
+            },
+            // 8XY5
+            8 if n == 5 => {
+                let (x_new, carry) = self.reg_v[x as usize].overflowing_sub(self.reg_v[y as usize]);
+                self.reg_v[x as usize] = x_new;
+                self.reg_v[0xF] = (!carry).into();
+            },
+            // 8XY6
+            8 if n == 6 => {
+                self.reg_v[x as usize] = self.reg_v[y as usize];
+                let vf = self.reg_v[x as usize] & 1;
+                self.reg_v[x as usize] = self.reg_v[x as usize] >> 1;
+                self.reg_v[0xF] = vf;
+            },
+            // 8XY7
+            8 if n == 7 => {
+                let (x_new, carry) = self.reg_v[y as usize].overflowing_sub(self.reg_v[x as usize]);
+                self.reg_v[x as usize] = x_new;
+                self.reg_v[0xF] = (!carry).into();
+            },
+            // 8XYE
+            8 if n == 0xE => {
+                self.reg_v[x as usize] = self.reg_v[y as usize];
+                let vf = (self.reg_v[x as usize] > 0x80).into();
+                self.reg_v[x as usize] = self.reg_v[x as usize] << 1;
+                self.reg_v[0xF] = vf;
+            },
+            // 9XY0
+            9 if n == 0 => {
+                if self.reg_v[x as usize] != self.reg_v[y as usize] {
+                    self.pc += 2;
+                }
             },
             // ANNN
             0xA => {
@@ -209,6 +298,27 @@ impl Emulator {
                     self.reg_v[x as usize] & 63,
                     self.reg_v[y as usize] & 31,
                 ).into();
+            },
+            // FX33
+            0xF if nn == 0x33 => {
+                let i_usize = self.reg_i as usize;
+                let units = self.reg_v[x as usize] % 10;
+                let rest = self.reg_v[x as usize] / 10;
+                let tens = rest % 10;
+                let hundreds = rest / 10;
+                self.memory[i_usize] = hundreds;
+                self.memory[i_usize + 1] = tens;
+                self.memory[i_usize + 2] = units;
+            },
+            // FX55
+            0xF if nn == 0x55 => {
+                let i_usize = self.reg_i as usize;
+                self.memory[i_usize..=(i_usize + x as usize)].copy_from_slice(&self.reg_v[0..=x as usize]);
+            },
+            // FX65
+            0xF if nn == 0x65 => {
+                let i_usize = self.reg_i as usize;
+                self.reg_v[0..=x as usize].copy_from_slice(&self.memory[i_usize..=(i_usize + x as usize)]);
             },
             _ => {
                 logs.push(format!("Unknown instruction {first:x?}{nn:x?}; skipping"));
