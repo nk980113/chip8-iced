@@ -262,7 +262,6 @@ impl Emulator {
             },
             // 8XY6
             8 if n == 6 => {
-                self.reg_v[x as usize] = self.reg_v[y as usize];
                 let vf = self.reg_v[x as usize] & 1;
                 self.reg_v[x as usize] = self.reg_v[x as usize] >> 1;
                 self.reg_v[0xF] = vf;
@@ -275,7 +274,6 @@ impl Emulator {
             },
             // 8XYE
             8 if n == 0xE => {
-                self.reg_v[x as usize] = self.reg_v[y as usize];
                 let vf = (self.reg_v[x as usize] > 0x80).into();
                 self.reg_v[x as usize] = self.reg_v[x as usize] << 1;
                 self.reg_v[0xF] = vf;
@@ -290,6 +288,8 @@ impl Emulator {
             0xA => {
                 self.reg_i = nnn;
             },
+            // TODO: BNNN
+            // TODO: CXNN
             // DXYN
             0xD => {
                 let i_usize = self.reg_i as usize;
@@ -298,6 +298,22 @@ impl Emulator {
                     self.reg_v[x as usize] & 63,
                     self.reg_v[y as usize] & 31,
                 ).into();
+            },
+            // TODO: EX9E
+            // TODO: EXA1
+            // TODO: FX07
+            // TODO: FX0A
+            // TODO: FX15
+            // TODO: FX18
+            // FX1E
+            0xF if nn == 0x1E => {
+                let (i_new, overflow) = self.reg_i.overflowing_add(self.reg_v[x as usize] as u16);
+                self.reg_i = i_new;
+                self.reg_v[0xF] = overflow.into();
+            },
+            // FX29
+            0xF if nn == 0x29 => {
+                self.reg_i = 0x50 + (self.reg_v[x as usize] as u16 & 15) * 5;
             },
             // FX33
             0xF if nn == 0x33 => {
@@ -351,7 +367,7 @@ impl Screen {
                 *target = *target ^ shifted;
             },
             x if x < 0 => for row in 0..(sprite.len().min(32 - y as usize)) {
-                let shifted: u64 = sprite[row] as u64 >> x;
+                let shifted: u64 = sprite[row] as u64 >> -x;
                 let target = &mut self.content[y as usize + row];
                 if *target & shifted > 0 { vf_ret = true; }
                 *target = *target ^ shifted;
